@@ -135,7 +135,7 @@ const Index = () => {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight">
-                Agent Hedge <span className="text-gradient">DAO</span>
+                Agentorium <span className="text-gradient">DAO</span>
               </h1>
               <p className="text-[11px] text-muted-foreground font-mono">cooperative onchain quant fund · v0.1</p>
             </div>

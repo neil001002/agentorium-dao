@@ -1,6 +1,6 @@
 import { corsHeaders } from "../_shared/cors.ts";
 
-// Multi-agent orchestrator for Agent Hedge DAO
+// Multi-agent orchestrator for Agentorium
 // Pipeline: Planner -> Researcher -> Trader -> Risk Manager
 // Uses Lovable AI Gateway (Gemini Flash) and emits a sequence of P2P-style messages.
 
