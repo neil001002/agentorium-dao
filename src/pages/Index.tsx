@@ -134,6 +134,7 @@ const Index = () => {
 
   const runOnce = async () => {
     setRunning(true);
+    setExecutionMode("idle");
     setActiveAgent("Planner");
     try {
       const { data, error } = await supabase.functions.invoke("agent-loop", {
