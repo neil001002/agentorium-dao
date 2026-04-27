@@ -111,7 +111,7 @@ const Index = () => {
 
     const [ethBalance, usdcBalance] = await Promise.all([
       publicClient.getBalance({ address }),
-      publicClient.readContract({ address: SEPOLIA_USDC, abi: USDC_BALANCE_ABI, functionName: "balanceOf", args: [address] }),
+      (publicClient.readContract as any)({ address: SEPOLIA_USDC, abi: USDC_BALANCE_ABI, functionName: "balanceOf", args: [address] }),
     ]);
     setEthAmt(Number(formatEther(ethBalance)));
     setUsdcAmt(Number(formatUnits(usdcBalance, 6)));
@@ -150,6 +150,7 @@ const Index = () => {
     const walletCap = parseEther(Math.max(0, ethAmt).toFixed(8)) > GAS_RESERVE ? parseEther(Math.max(0, ethAmt).toFixed(8)) - GAS_RESERVE : 0n;
     const cappedByDemo = requested > MAX_TEST_AMOUNT_IN ? MAX_TEST_AMOUNT_IN : requested;
     const cappedByWallet = walletCap > 0n && cappedByDemo > walletCap ? walletCap : cappedByDemo;
+    if (walletCap < MIN_TEST_AMOUNT_IN) throw new Error("Your Sepolia ETH balance is too low for a safe test swap plus gas.");
     return cappedByWallet >= MIN_TEST_AMOUNT_IN ? cappedByWallet : DEFAULT_TEST_AMOUNT_IN;
   };
 
@@ -199,10 +200,24 @@ const Index = () => {
       explorerUrl: `https://sepolia.etherscan.io/tx/${hash}`,
     };
     setTxs((prev) => [tx, ...prev]);
+    await (supabase.from("execution_logs" as never) as any).upsert({
+      wallet_address: address,
+      tx_hash: hash,
+      description,
+      gas_gwei: tx.gasGwei,
+      status: "submitted",
+      chain: "sepolia",
+      explorer_url: tx.explorerUrl,
+    });
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    setTxs((prev) => prev.map((t) => (t.id === hash ? { ...t, status: receipt.status === "success" ? "confirmed" : "failed" } : t)));
-    setExecutionMode(receipt.status === "success" ? "confirmed" : "failed");
+    const finalStatus = receipt.status === "success" ? "confirmed" : "failed";
+    setTxs((prev) => prev.map((t) => (t.id === hash ? { ...t, status: finalStatus } : t)));
+    setExecutionMode(finalStatus);
+    await (supabase.from("execution_logs" as never) as any)
+      .update({ status: finalStatus, confirmed_at: new Date().toISOString() })
+      .eq("tx_hash", hash);
+    await refreshBalances().catch(() => undefined);
 
     if (receipt.status !== "success") throw new Error("Sepolia swap transaction failed.");
     return hash;
@@ -229,11 +244,7 @@ const Index = () => {
         setActiveAgent(sender);
         setMessages((prev) => [...prev, m]);
         if (m.role === "execute" && typeof m.metadata === "object" && m.metadata) {
-          const description = data.trade
-            ? `Sepolia Uniswap: ${data.trade.action} 0.0001 ETH→USDC test swap`
-            : "Sepolia Uniswap test swap";
-          await executeSepoliaSwap(description);
-          setUsdcAmt((u) => u + 0.23);
+          await executeSepoliaSwap(data.trade as TradeProposal | undefined);
           setPnl24h((p) => p + Math.round((Math.random() - 0.4) * 20));
         }
         await new Promise((r) => setTimeout(r, 700));
