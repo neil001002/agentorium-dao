@@ -14,7 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      execution_logs: {
+        Row: {
+          chain: string
+          confirmed_at: string | null
+          created_at: string
+          description: string
+          explorer_url: string | null
+          gas_gwei: number
+          id: string
+          status: string
+          tx_hash: string
+          wallet_address: string
+        }
+        Insert: {
+          chain?: string
+          confirmed_at?: string | null
+          created_at?: string
+          description: string
+          explorer_url?: string | null
+          gas_gwei?: number
+          id?: string
+          status?: string
+          tx_hash: string
+          wallet_address: string
+        }
+        Update: {
+          chain?: string
+          confirmed_at?: string | null
+          created_at?: string
+          description?: string
+          explorer_url?: string | null
+          gas_gwei?: number
+          id?: string
+          status?: string
+          tx_hash?: string
+          wallet_address?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
