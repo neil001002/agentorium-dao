@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, Play, Sparkles, Square, Boxes, Network, Github } from "lucide-react";
+import { formatGwei, parseEther, type Address } from "viem";
+import { useAccount, useConnect, useDisconnect, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { sepolia } from "@/lib/wagmi";
 import { PortfolioCard, type Position } from "@/components/PortfolioCard";
 import { MessageFeed, type AxlMessage } from "@/components/MessageFeed";
 import { UniswapQuoteCard } from "@/components/UniswapQuoteCard";
@@ -12,6 +15,34 @@ import { AgentRoster } from "@/components/AgentRoster";
 import type { AgentKey } from "@/components/AgentBadge";
 
 type RiskProfile = "conservative" | "balanced" | "aggressive";
+
+const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
+const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
+const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
+const TEST_AMOUNT_IN = parseEther("0.0001");
+const SWAP_ROUTER_ABI = [
+  {
+    type: "function",
+    name: "exactInputSingle",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "params",
+        type: "tuple",
+        components: [
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "fee", type: "uint24" },
+          { name: "recipient", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "amountOutMinimum", type: "uint256" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+        ],
+      },
+    ],
+    outputs: [{ name: "amountOut", type: "uint256" }],
+  },
+] as const;
 
 const SPONSORS = [
   { name: "0G", desc: "Storage & Compute" },
@@ -23,11 +54,19 @@ const SPONSORS = [
 const Index = () => {
   const [risk, setRisk] = useState<RiskProfile>("balanced");
   const [running, setRunning] = useState(false);
+  const [executionMode, setExecutionMode] = useState<"idle" | "awaiting_signature" | "submitted" | "confirmed" | "failed">("idle");
   const [activeAgent, setActiveAgent] = useState<AgentKey | null>(null);
   const [messages, setMessages] = useState<AxlMessage[]>([]);
   const [txs, setTxs] = useState<KeeperTx[]>([]);
   const [ethPrice, setEthPrice] = useState(3500);
   const [pnl24h, setPnl24h] = useState(2487);
+  const { address, isConnected, chainId } = useAccount();
+  const { connect, connectors, isPending: isConnecting } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const publicClient = usePublicClient({ chainId: sepolia.id });
+  const { writeContractAsync } = useWriteContract();
+  const onSepolia = chainId === sepolia.id;
 
   // Mock holdings
   const [ethAmt] = useState(12.4);
@@ -45,8 +84,57 @@ const Index = () => {
 
   const totalUsd = positions.reduce((s, p) => s + p.usdValue, 0);
 
+  const executeSepoliaSwap = async (description: string) => {
+    if (!address) throw new Error("Connect a wallet before executing a testnet swap.");
+    if (!onSepolia) throw new Error("Switch your wallet to Sepolia before executing.");
+    if (!publicClient) throw new Error("Sepolia public client is not ready.");
+
+    setExecutionMode("awaiting_signature");
+    const hash = await writeContractAsync({
+      address: SEPOLIA_SWAP_ROUTER,
+      abi: SWAP_ROUTER_ABI,
+      functionName: "exactInputSingle",
+      account: address,
+      chain: sepolia,
+      chainId: sepolia.id,
+      value: TEST_AMOUNT_IN,
+      args: [
+        {
+          tokenIn: SEPOLIA_WETH,
+          tokenOut: SEPOLIA_USDC,
+          fee: 3000,
+          recipient: address,
+          amountIn: TEST_AMOUNT_IN,
+          amountOutMinimum: 0n,
+          sqrtPriceLimitX96: 0n,
+        },
+      ],
+    });
+
+    setExecutionMode("submitted");
+    const gasPrice = await publicClient.getGasPrice().catch(() => 0n);
+    const tx: KeeperTx = {
+      id: hash,
+      ts: Date.now(),
+      hash,
+      description,
+      gasGwei: Number(formatGwei(gasPrice || 0n)),
+      status: "submitted",
+      explorerUrl: `https://sepolia.etherscan.io/tx/${hash}`,
+    };
+    setTxs((prev) => [tx, ...prev]);
+
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    setTxs((prev) => prev.map((t) => (t.id === hash ? { ...t, status: receipt.status === "success" ? "confirmed" : "failed" } : t)));
+    setExecutionMode(receipt.status === "success" ? "confirmed" : "failed");
+
+    if (receipt.status !== "success") throw new Error("Sepolia swap transaction failed.");
+    return hash;
+  };
+
   const runOnce = async () => {
     setRunning(true);
+    setExecutionMode("idle");
     setActiveAgent("Planner");
     try {
       const { data, error } = await supabase.functions.invoke("agent-loop", {
@@ -65,26 +153,12 @@ const Index = () => {
         setActiveAgent(sender);
         setMessages((prev) => [...prev, m]);
         if (m.role === "execute" && typeof m.metadata === "object" && m.metadata) {
-          const md = m.metadata as { gas_gwei?: number };
-          const hashMatch = m.content.match(/0x[a-f0-9]+/);
-          setTxs((prev) => [
-            {
-              id: m.id,
-              ts: m.ts,
-              hash: hashMatch?.[0] ?? "0x" + crypto.randomUUID().replace(/-/g, "").slice(0, 40),
-              description: data.trade
-                ? `${data.trade.action} $${data.trade.amount_in_usd} ${data.trade.token_in}→${data.trade.token_out}`
-                : "Executed swap",
-              gasGwei: md.gas_gwei ?? 14,
-              status: "confirmed",
-            },
-            ...prev,
-          ]);
-          // Mock portfolio drift
-          if (data.trade) {
-            setUsdcAmt((u) => u + (data.trade.action === "SELL" ? data.trade.amount_in_usd : -data.trade.amount_in_usd));
-            setPnl24h((p) => p + Math.round((Math.random() - 0.4) * 200));
-          }
+          const description = data.trade
+            ? `Sepolia Uniswap: ${data.trade.action} 0.0001 ETH→USDC test swap`
+            : "Sepolia Uniswap test swap";
+          await executeSepoliaSwap(description);
+          setUsdcAmt((u) => u + 0.23);
+          setPnl24h((p) => p + Math.round((Math.random() - 0.4) * 20));
         }
         await new Promise((r) => setTimeout(r, 700));
       }
@@ -234,15 +308,56 @@ const Index = () => {
                 ))}
               </ToggleGroup>
 
+              <div className="mt-4 rounded-xl bg-muted/30 ring-1 ring-border/60 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Wallet</div>
+                    <div className="text-sm font-mono text-foreground/90">
+                      {isConnected && address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "Not connected"}
+                    </div>
+                  </div>
+                  {isConnected ? (
+                    <Button variant="outline" size="sm" className="bg-transparent" onClick={() => disconnect()}>
+                      Disconnect
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-transparent"
+                      disabled={isConnecting || connectors.length === 0}
+                      onClick={() => connect({ connector: connectors[0] })}
+                    >
+                      {isConnecting ? "Connecting…" : "Connect"}
+                    </Button>
+                  )}
+                </div>
+                {isConnected && !onSepolia && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full bg-warning/10 text-warning hover:bg-warning/20"
+                    disabled={isSwitching}
+                    onClick={() => switchChain({ chainId: sepolia.id })}
+                  >
+                    {isSwitching ? "Switching…" : "Switch to Sepolia"}
+                  </Button>
+                )}
+                <div className="text-[11px] font-mono text-muted-foreground">
+                  Real execution: 0.0001 Sepolia ETH → USDC through Uniswap SwapRouter.
+                </div>
+              </div>
+
               <div className="mt-5 space-y-2">
                 <Button
                   onClick={runOnce}
-                  disabled={running}
+                  disabled={running || !isConnected || !onSepolia}
                   className="w-full bg-gradient-primary hover:opacity-90 text-primary-foreground font-semibold"
                 >
                   {running ? (
                     <>
-                      <Activity className="h-4 w-4 mr-2 animate-pulse-dot" /> Cycle running…
+                      <Activity className="h-4 w-4 mr-2 animate-pulse-dot" />
+                      {executionMode === "awaiting_signature" ? "Awaiting wallet…" : "Cycle running…"}
                     </>
                   ) : (
                     <>
@@ -254,6 +369,7 @@ const Index = () => {
                 <Button
                   variant="outline"
                   onClick={() => setAutoLoop((v) => !v)}
+                  disabled={!isConnected || !onSepolia}
                   className="w-full ring-1 ring-border bg-transparent hover:bg-muted/40"
                 >
                   {autoLoop ? (
@@ -269,7 +385,7 @@ const Index = () => {
               </div>
 
               <p className="mt-3 text-[11px] font-mono text-muted-foreground leading-relaxed">
-                Each cycle: Planner → Researcher → Trader → Risk → KeeperHub. Persisted to 0G log.
+                Each approved cycle asks your wallet to sign one real Sepolia Uniswap test swap.
               </p>
             </div>
 

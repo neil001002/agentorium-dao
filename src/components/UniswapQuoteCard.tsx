@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 interface Quote {
   timestamp: number;
   tokens: Record<string, { usd: number; change24h: number }>;
+  stale?: boolean;
   sampleQuote: {
     tokenIn: string;
     tokenOut: string;
@@ -54,14 +55,14 @@ export const UniswapQuoteCard = ({ onQuote }: Props) => {
             <ArrowDownUp className="h-4 w-4 text-secondary-foreground" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold tracking-tight">Live Uniswap Quote</h3>
-            <p className="text-[11px] text-muted-foreground font-mono">via Uniswap routing API</p>
+            <h3 className="text-sm font-semibold tracking-tight">Sepolia Uniswap Execution</h3>
+            <p className="text-[11px] text-muted-foreground font-mono">wallet-signed testnet swaps</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success/10 ring-1 ring-success/30">
           <Activity className="h-3 w-3 text-success" />
           <span className="text-[10px] font-mono uppercase tracking-wider text-success">
-            {loading ? "syncing" : "live"}
+            {loading ? "syncing" : quote?.stale ? "fallback" : "live"}
           </span>
         </div>
       </header>
