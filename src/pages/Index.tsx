@@ -66,11 +66,19 @@ const SPONSORS = [
 const Index = () => {
   const [risk, setRisk] = useState<RiskProfile>("balanced");
   const [running, setRunning] = useState(false);
+  const [executionMode, setExecutionMode] = useState<"idle" | "awaiting_signature" | "submitted" | "confirmed" | "failed">("idle");
   const [activeAgent, setActiveAgent] = useState<AgentKey | null>(null);
   const [messages, setMessages] = useState<AxlMessage[]>([]);
   const [txs, setTxs] = useState<KeeperTx[]>([]);
   const [ethPrice, setEthPrice] = useState(3500);
   const [pnl24h, setPnl24h] = useState(2487);
+  const { address, isConnected, chainId } = useAccount();
+  const { connect, connectors, isPending: isConnecting } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const publicClient = usePublicClient({ chainId: sepolia.id });
+  const { writeContractAsync } = useWriteContract();
+  const onSepolia = chainId === sepolia.id;
 
   // Mock holdings
   const [ethAmt] = useState(12.4);
