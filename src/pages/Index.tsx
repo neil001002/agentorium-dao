@@ -79,6 +79,8 @@ const Index = () => {
   const [txs, setTxs] = useState<KeeperTx[]>([]);
   const [ethPrice, setEthPrice] = useState(3500);
   const [pnl24h, setPnl24h] = useState(2487);
+  const [ethAmt, setEthAmt] = useState(0);
+  const [usdcAmt, setUsdcAmt] = useState(0);
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
@@ -87,26 +89,81 @@ const Index = () => {
   const { writeContractAsync } = useWriteContract();
   const onSepolia = chainId === sepolia.id;
 
-  // Mock holdings
-  const [ethAmt] = useState(12.4);
-  const [usdcAmt, setUsdcAmt] = useState(28_400);
-  const [wbtcAmt] = useState(0.18);
+  const wbtcAmt = 0;
 
   const positions: Position[] = useMemo(
     () => [
       { symbol: "ETH", amount: ethAmt, usdValue: ethAmt * ethPrice, change24h: 2.3 },
       { symbol: "USDC", amount: usdcAmt, usdValue: usdcAmt, change24h: 0 },
-      { symbol: "WBTC", amount: wbtcAmt, usdValue: wbtcAmt * 67_000, change24h: -0.8 },
+      { symbol: "WBTC", amount: wbtcAmt, usdValue: wbtcAmt * 67_000, change24h: 0 },
     ],
     [ethAmt, usdcAmt, wbtcAmt, ethPrice],
   );
 
   const totalUsd = positions.reduce((s, p) => s + p.usdValue, 0);
 
-  const executeSepoliaSwap = async (description: string) => {
+  const refreshBalances = useCallback(async () => {
+    if (!address || !publicClient || !onSepolia) {
+      setEthAmt(0);
+      setUsdcAmt(0);
+      return;
+    }
+
+    const [ethBalance, usdcBalance] = await Promise.all([
+      publicClient.getBalance({ address }),
+      publicClient.readContract({ address: SEPOLIA_USDC, abi: USDC_BALANCE_ABI, functionName: "balanceOf", args: [address] }),
+    ]);
+    setEthAmt(Number(formatEther(ethBalance)));
+    setUsdcAmt(Number(formatUnits(usdcBalance, 6)));
+  }, [address, onSepolia, publicClient]);
+
+  useEffect(() => {
+    refreshBalances().catch(() => undefined);
+  }, [refreshBalances]);
+
+  useEffect(() => {
+    const loadLogs = async () => {
+      const query = (supabase.from("execution_logs" as never) as any)
+        .select("tx_hash, description, gas_gwei, status, explorer_url, created_at")
+        .order("created_at", { ascending: false })
+        .limit(12);
+      const { data } = address ? await query.ilike("wallet_address", address) : await query;
+      if (!data) return;
+      setTxs(
+        data.map((row: any) => ({
+          id: row.tx_hash,
+          ts: new Date(row.created_at).getTime(),
+          hash: row.tx_hash,
+          description: row.description,
+          gasGwei: Number(row.gas_gwei ?? 0),
+          status: row.status,
+          explorerUrl: row.explorer_url,
+        })),
+      );
+    };
+    loadLogs().catch(() => undefined);
+  }, [address]);
+
+  const getExecutionAmount = (trade?: TradeProposal) => {
+    const rawEth = trade?.token_in?.toUpperCase() === "ETH" && trade.amount_in_usd > 0 ? trade.amount_in_usd / ethPrice : 0.0001;
+    const requested = parseEther(Math.max(0.00001, rawEth).toFixed(8));
+    const walletCap = parseEther(Math.max(0, ethAmt).toFixed(8)) > GAS_RESERVE ? parseEther(Math.max(0, ethAmt).toFixed(8)) - GAS_RESERVE : 0n;
+    const cappedByDemo = requested > MAX_TEST_AMOUNT_IN ? MAX_TEST_AMOUNT_IN : requested;
+    const cappedByWallet = walletCap > 0n && cappedByDemo > walletCap ? walletCap : cappedByDemo;
+    return cappedByWallet >= MIN_TEST_AMOUNT_IN ? cappedByWallet : DEFAULT_TEST_AMOUNT_IN;
+  };
+
+  const executeSepoliaSwap = async (trade?: TradeProposal) => {
     if (!address) throw new Error("Connect a wallet before executing a testnet swap.");
     if (!onSepolia) throw new Error("Switch your wallet to Sepolia before executing.");
     if (!publicClient) throw new Error("Sepolia public client is not ready.");
+
+    const amountIn = getExecutionAmount(trade);
+    const estimatedOut = Number(formatEther(amountIn)) * ethPrice;
+    const minOut = parseUnits(Math.max(0, estimatedOut * 0.94).toFixed(6), 6);
+    const description = trade
+      ? `Sepolia Uniswap: ${trade.action} ${Number(formatEther(amountIn)).toFixed(6)} ${trade.token_in}→${trade.token_out}`
+      : `Sepolia Uniswap: ${Number(formatEther(amountIn)).toFixed(6)} ETH→USDC`;
 
     setExecutionMode("awaiting_signature");
     const hash = await writeContractAsync({
@@ -116,15 +173,15 @@ const Index = () => {
       account: address,
       chain: sepolia,
       chainId: sepolia.id,
-      value: TEST_AMOUNT_IN,
+      value: amountIn,
       args: [
         {
           tokenIn: SEPOLIA_WETH,
           tokenOut: SEPOLIA_USDC,
           fee: 3000,
           recipient: address,
-          amountIn: TEST_AMOUNT_IN,
-          amountOutMinimum: 0n,
+          amountIn,
+          amountOutMinimum: minOut,
           sqrtPriceLimitX96: 0n,
         },
       ],
