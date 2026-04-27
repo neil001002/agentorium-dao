@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Play, Sparkles, Square, Boxes, Network, Github } from "lucide-react";
-import { formatGwei, parseEther, type Address } from "viem";
+import { formatEther, formatGwei, formatUnits, parseEther, parseUnits, type Address } from "viem";
 import { useAccount, useConnect, useDisconnect, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -15,11 +15,30 @@ import { AgentRoster } from "@/components/AgentRoster";
 import type { AgentKey } from "@/components/AgentBadge";
 
 type RiskProfile = "conservative" | "balanced" | "aggressive";
+type TradeProposal = {
+  action: "BUY" | "SELL";
+  token_in: string;
+  token_out: string;
+  amount_in_usd: number;
+  reason: string;
+};
 
 const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
 const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
-const TEST_AMOUNT_IN = parseEther("0.0001");
+const DEFAULT_TEST_AMOUNT_IN = parseEther("0.0001");
+const MIN_TEST_AMOUNT_IN = parseEther("0.00001");
+const MAX_TEST_AMOUNT_IN = parseEther("0.0005");
+const GAS_RESERVE = parseEther("0.00003");
+const USDC_BALANCE_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
 const SWAP_ROUTER_ABI = [
   {
     type: "function",
