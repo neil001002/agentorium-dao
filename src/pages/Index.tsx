@@ -106,6 +106,8 @@ const Index = () => {
       address: SEPOLIA_SWAP_ROUTER,
       abi: SWAP_ROUTER_ABI,
       functionName: "exactInputSingle",
+      account: address,
+      chain: sepolia,
       chainId: sepolia.id,
       value: TEST_AMOUNT_IN,
       args: [
