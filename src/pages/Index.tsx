@@ -307,10 +307,50 @@ const Index = () => {
                 ))}
               </ToggleGroup>
 
+              <div className="mt-4 rounded-xl bg-muted/30 ring-1 ring-border/60 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Wallet</div>
+                    <div className="text-sm font-mono text-foreground/90">
+                      {isConnected && address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "Not connected"}
+                    </div>
+                  </div>
+                  {isConnected ? (
+                    <Button variant="outline" size="sm" className="bg-transparent" onClick={() => disconnect()}>
+                      Disconnect
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-transparent"
+                      disabled={isConnecting || connectors.length === 0}
+                      onClick={() => connect({ connector: connectors[0] })}
+                    >
+                      {isConnecting ? "Connecting…" : "Connect"}
+                    </Button>
+                  )}
+                </div>
+                {isConnected && !onSepolia && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full bg-warning/10 text-warning hover:bg-warning/20"
+                    disabled={isSwitching}
+                    onClick={() => switchChain({ chainId: sepolia.id })}
+                  >
+                    {isSwitching ? "Switching…" : "Switch to Sepolia"}
+                  </Button>
+                )}
+                <div className="text-[11px] font-mono text-muted-foreground">
+                  Real execution: 0.0001 Sepolia ETH → USDC through Uniswap SwapRouter.
+                </div>
+              </div>
+
               <div className="mt-5 space-y-2">
                 <Button
                   onClick={runOnce}
-                  disabled={running}
+                  disabled={running || !isConnected || !onSepolia}
                   className="w-full bg-gradient-primary hover:opacity-90 text-primary-foreground font-semibold"
                 >
                   {running ? (
