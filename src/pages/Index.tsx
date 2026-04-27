@@ -355,7 +355,8 @@ const Index = () => {
                 >
                   {running ? (
                     <>
-                      <Activity className="h-4 w-4 mr-2 animate-pulse-dot" /> Cycle running…
+                      <Activity className="h-4 w-4 mr-2 animate-pulse-dot" />
+                      {executionMode === "awaiting_signature" ? "Awaiting wallet…" : "Cycle running…"}
                     </>
                   ) : (
                     <>
@@ -367,6 +368,7 @@ const Index = () => {
                 <Button
                   variant="outline"
                   onClick={() => setAutoLoop((v) => !v)}
+                  disabled={!isConnected || !onSepolia}
                   className="w-full ring-1 ring-border bg-transparent hover:bg-muted/40"
                 >
                   {autoLoop ? (
@@ -382,7 +384,7 @@ const Index = () => {
               </div>
 
               <p className="mt-3 text-[11px] font-mono text-muted-foreground leading-relaxed">
-                Each cycle: Planner → Researcher → Trader → Risk → KeeperHub. Persisted to 0G log.
+                Each approved cycle asks your wallet to sign one real Sepolia Uniswap test swap.
               </p>
             </div>
 
