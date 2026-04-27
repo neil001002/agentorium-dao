@@ -96,6 +96,52 @@ const Index = () => {
 
   const totalUsd = positions.reduce((s, p) => s + p.usdValue, 0);
 
+  const executeSepoliaSwap = async (description: string) => {
+    if (!address) throw new Error("Connect a wallet before executing a testnet swap.");
+    if (!onSepolia) throw new Error("Switch your wallet to Sepolia before executing.");
+    if (!publicClient) throw new Error("Sepolia public client is not ready.");
+
+    setExecutionMode("awaiting_signature");
+    const hash = await writeContractAsync({
+      address: SEPOLIA_SWAP_ROUTER,
+      abi: SWAP_ROUTER_ABI,
+      functionName: "exactInputSingle",
+      chainId: sepolia.id,
+      value: TEST_AMOUNT_IN,
+      args: [
+        {
+          tokenIn: SEPOLIA_WETH,
+          tokenOut: SEPOLIA_USDC,
+          fee: 3000,
+          recipient: address,
+          amountIn: TEST_AMOUNT_IN,
+          amountOutMinimum: 0n,
+          sqrtPriceLimitX96: 0n,
+        },
+      ],
+    });
+
+    setExecutionMode("submitted");
+    const gasPrice = await publicClient.getGasPrice().catch(() => 0n);
+    const tx: KeeperTx = {
+      id: hash,
+      ts: Date.now(),
+      hash,
+      description,
+      gasGwei: Number(formatGwei(gasPrice || 0n)),
+      status: "submitted",
+      explorerUrl: `https://sepolia.etherscan.io/tx/${hash}`,
+    };
+    setTxs((prev) => [tx, ...prev]);
+
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    setTxs((prev) => prev.map((t) => (t.id === hash ? { ...t, status: receipt.status === "success" ? "confirmed" : "failed" } : t)));
+    setExecutionMode(receipt.status === "success" ? "confirmed" : "failed");
+
+    if (receipt.status !== "success") throw new Error("Sepolia swap transaction failed.");
+    return hash;
+  };
+
   const runOnce = async () => {
     setRunning(true);
     setActiveAgent("Planner");
