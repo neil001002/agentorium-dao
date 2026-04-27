@@ -7,6 +7,7 @@ export interface KeeperTx {
   description: string;
   gasGwei: number;
   status: "submitted" | "confirmed" | "failed";
+  explorerUrl?: string;
 }
 
 interface Props {
@@ -49,12 +50,16 @@ export const KeeperLog = ({ txs }: Props) => {
                   <span className="opacity-50">·</span>
                   <span>{tx.gasGwei.toFixed(1)} gwei</span>
                   <span className="opacity-50">·</span>
+                  <span>{tx.status}</span>
+                  <span className="opacity-50">·</span>
                   <span>{new Date(tx.ts).toLocaleTimeString()}</span>
                 </div>
               </div>
               <a
-                href="#"
-                onClick={(e) => e.preventDefault()}
+                href={tx.explorerUrl ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => !tx.explorerUrl && e.preventDefault()}
                 className="text-muted-foreground hover:text-primary transition-colors"
                 aria-label="open tx"
               >
