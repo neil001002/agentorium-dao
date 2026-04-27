@@ -431,7 +431,7 @@ const Index = () => {
                   </Button>
                 )}
                 <div className="text-[11px] font-mono text-muted-foreground">
-                  Real execution: 0.0001 Sepolia ETH → USDC through Uniswap SwapRouter.
+                  Real execution: AI-sized Sepolia ETH → USDC through Uniswap SwapRouter, capped at 0.0005 ETH.
                 </div>
               </div>
 
@@ -472,7 +472,7 @@ const Index = () => {
               </div>
 
               <p className="mt-3 text-[11px] font-mono text-muted-foreground leading-relaxed">
-                Each approved cycle asks your wallet to sign one real Sepolia Uniswap test swap.
+                Each approved cycle reads wallet balances, applies risk caps and slippage, then asks your wallet to sign.
               </p>
             </div>
 
