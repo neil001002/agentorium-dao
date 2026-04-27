@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Play, Sparkles, Square, Boxes, Network, Github } from "lucide-react";
-import { formatGwei, parseEther, type Address } from "viem";
+import { formatEther, formatGwei, formatUnits, parseEther, parseUnits, type Address } from "viem";
 import { useAccount, useConnect, useDisconnect, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -15,11 +15,30 @@ import { AgentRoster } from "@/components/AgentRoster";
 import type { AgentKey } from "@/components/AgentBadge";
 
 type RiskProfile = "conservative" | "balanced" | "aggressive";
+type TradeProposal = {
+  action: "BUY" | "SELL";
+  token_in: string;
+  token_out: string;
+  amount_in_usd: number;
+  reason: string;
+};
 
 const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
 const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
-const TEST_AMOUNT_IN = parseEther("0.0001");
+const DEFAULT_TEST_AMOUNT_IN = parseEther("0.0001");
+const MIN_TEST_AMOUNT_IN = parseEther("0.00001");
+const MAX_TEST_AMOUNT_IN = parseEther("0.0005");
+const GAS_RESERVE = parseEther("0.00003");
+const USDC_BALANCE_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
 const SWAP_ROUTER_ABI = [
   {
     type: "function",
@@ -60,6 +79,8 @@ const Index = () => {
   const [txs, setTxs] = useState<KeeperTx[]>([]);
   const [ethPrice, setEthPrice] = useState(3500);
   const [pnl24h, setPnl24h] = useState(2487);
+  const [ethAmt, setEthAmt] = useState(0);
+  const [usdcAmt, setUsdcAmt] = useState(0);
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
@@ -68,26 +89,82 @@ const Index = () => {
   const { writeContractAsync } = useWriteContract();
   const onSepolia = chainId === sepolia.id;
 
-  // Mock holdings
-  const [ethAmt] = useState(12.4);
-  const [usdcAmt, setUsdcAmt] = useState(28_400);
-  const [wbtcAmt] = useState(0.18);
+  const wbtcAmt = 0;
 
   const positions: Position[] = useMemo(
     () => [
       { symbol: "ETH", amount: ethAmt, usdValue: ethAmt * ethPrice, change24h: 2.3 },
       { symbol: "USDC", amount: usdcAmt, usdValue: usdcAmt, change24h: 0 },
-      { symbol: "WBTC", amount: wbtcAmt, usdValue: wbtcAmt * 67_000, change24h: -0.8 },
+      { symbol: "WBTC", amount: wbtcAmt, usdValue: wbtcAmt * 67_000, change24h: 0 },
     ],
     [ethAmt, usdcAmt, wbtcAmt, ethPrice],
   );
 
   const totalUsd = positions.reduce((s, p) => s + p.usdValue, 0);
 
-  const executeSepoliaSwap = async (description: string) => {
+  const refreshBalances = useCallback(async () => {
+    if (!address || !publicClient || !onSepolia) {
+      setEthAmt(0);
+      setUsdcAmt(0);
+      return;
+    }
+
+    const [ethBalance, usdcBalance] = await Promise.all([
+      publicClient.getBalance({ address }),
+      (publicClient.readContract as any)({ address: SEPOLIA_USDC, abi: USDC_BALANCE_ABI, functionName: "balanceOf", args: [address] }),
+    ]);
+    setEthAmt(Number(formatEther(ethBalance)));
+    setUsdcAmt(Number(formatUnits(usdcBalance, 6)));
+  }, [address, onSepolia, publicClient]);
+
+  useEffect(() => {
+    refreshBalances().catch(() => undefined);
+  }, [refreshBalances]);
+
+  useEffect(() => {
+    const loadLogs = async () => {
+      const query = (supabase.from("execution_logs" as never) as any)
+        .select("tx_hash, description, gas_gwei, status, explorer_url, created_at")
+        .order("created_at", { ascending: false })
+        .limit(12);
+      const { data } = address ? await query.ilike("wallet_address", address) : await query;
+      if (!data) return;
+      setTxs(
+        data.map((row: any) => ({
+          id: row.tx_hash,
+          ts: new Date(row.created_at).getTime(),
+          hash: row.tx_hash,
+          description: row.description,
+          gasGwei: Number(row.gas_gwei ?? 0),
+          status: row.status,
+          explorerUrl: row.explorer_url,
+        })),
+      );
+    };
+    loadLogs().catch(() => undefined);
+  }, [address]);
+
+  const getExecutionAmount = (trade?: TradeProposal) => {
+    const rawEth = trade?.token_in?.toUpperCase() === "ETH" && trade.amount_in_usd > 0 ? trade.amount_in_usd / ethPrice : 0.0001;
+    const requested = parseEther(Math.max(0.00001, rawEth).toFixed(8));
+    const walletCap = parseEther(Math.max(0, ethAmt).toFixed(8)) > GAS_RESERVE ? parseEther(Math.max(0, ethAmt).toFixed(8)) - GAS_RESERVE : 0n;
+    const cappedByDemo = requested > MAX_TEST_AMOUNT_IN ? MAX_TEST_AMOUNT_IN : requested;
+    const cappedByWallet = walletCap > 0n && cappedByDemo > walletCap ? walletCap : cappedByDemo;
+    if (walletCap < MIN_TEST_AMOUNT_IN) throw new Error("Your Sepolia ETH balance is too low for a safe test swap plus gas.");
+    return cappedByWallet >= MIN_TEST_AMOUNT_IN ? cappedByWallet : DEFAULT_TEST_AMOUNT_IN;
+  };
+
+  const executeSepoliaSwap = async (trade?: TradeProposal) => {
     if (!address) throw new Error("Connect a wallet before executing a testnet swap.");
     if (!onSepolia) throw new Error("Switch your wallet to Sepolia before executing.");
     if (!publicClient) throw new Error("Sepolia public client is not ready.");
+
+    const amountIn = getExecutionAmount(trade);
+    const estimatedOut = Number(formatEther(amountIn)) * ethPrice;
+    const minOut = parseUnits(Math.max(0, estimatedOut * 0.94).toFixed(6), 6);
+    const description = trade
+      ? `Sepolia Uniswap: ${trade.action} ${Number(formatEther(amountIn)).toFixed(6)} ${trade.token_in}→${trade.token_out}`
+      : `Sepolia Uniswap: ${Number(formatEther(amountIn)).toFixed(6)} ETH→USDC`;
 
     setExecutionMode("awaiting_signature");
     const hash = await writeContractAsync({
@@ -97,15 +174,15 @@ const Index = () => {
       account: address,
       chain: sepolia,
       chainId: sepolia.id,
-      value: TEST_AMOUNT_IN,
+      value: amountIn,
       args: [
         {
           tokenIn: SEPOLIA_WETH,
           tokenOut: SEPOLIA_USDC,
           fee: 3000,
           recipient: address,
-          amountIn: TEST_AMOUNT_IN,
-          amountOutMinimum: 0n,
+          amountIn,
+          amountOutMinimum: minOut,
           sqrtPriceLimitX96: 0n,
         },
       ],
@@ -123,10 +200,24 @@ const Index = () => {
       explorerUrl: `https://sepolia.etherscan.io/tx/${hash}`,
     };
     setTxs((prev) => [tx, ...prev]);
+    await (supabase.from("execution_logs" as never) as any).upsert({
+      wallet_address: address,
+      tx_hash: hash,
+      description,
+      gas_gwei: tx.gasGwei,
+      status: "submitted",
+      chain: "sepolia",
+      explorer_url: tx.explorerUrl,
+    });
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    setTxs((prev) => prev.map((t) => (t.id === hash ? { ...t, status: receipt.status === "success" ? "confirmed" : "failed" } : t)));
-    setExecutionMode(receipt.status === "success" ? "confirmed" : "failed");
+    const finalStatus = receipt.status === "success" ? "confirmed" : "failed";
+    setTxs((prev) => prev.map((t) => (t.id === hash ? { ...t, status: finalStatus } : t)));
+    setExecutionMode(finalStatus);
+    await (supabase.from("execution_logs" as never) as any)
+      .update({ status: finalStatus, confirmed_at: new Date().toISOString() })
+      .eq("tx_hash", hash);
+    await refreshBalances().catch(() => undefined);
 
     if (receipt.status !== "success") throw new Error("Sepolia swap transaction failed.");
     return hash;
@@ -153,11 +244,7 @@ const Index = () => {
         setActiveAgent(sender);
         setMessages((prev) => [...prev, m]);
         if (m.role === "execute" && typeof m.metadata === "object" && m.metadata) {
-          const description = data.trade
-            ? `Sepolia Uniswap: ${data.trade.action} 0.0001 ETH→USDC test swap`
-            : "Sepolia Uniswap test swap";
-          await executeSepoliaSwap(description);
-          setUsdcAmt((u) => u + 0.23);
+          await executeSepoliaSwap(data.trade as TradeProposal | undefined);
           setPnl24h((p) => p + Math.round((Math.random() - 0.4) * 20));
         }
         await new Promise((r) => setTimeout(r, 700));
@@ -344,7 +431,7 @@ const Index = () => {
                   </Button>
                 )}
                 <div className="text-[11px] font-mono text-muted-foreground">
-                  Real execution: 0.0001 Sepolia ETH → USDC through Uniswap SwapRouter.
+                  Real execution: AI-sized Sepolia ETH → USDC through Uniswap SwapRouter, capped at 0.0005 ETH.
                 </div>
               </div>
 
@@ -385,7 +472,7 @@ const Index = () => {
               </div>
 
               <p className="mt-3 text-[11px] font-mono text-muted-foreground leading-relaxed">
-                Each approved cycle asks your wallet to sign one real Sepolia Uniswap test swap.
+                Each approved cycle reads wallet balances, applies risk caps and slippage, then asks your wallet to sign.
               </p>
             </div>
 

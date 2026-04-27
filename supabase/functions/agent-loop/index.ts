@@ -105,7 +105,7 @@ Be decisive. Mention target ETH/stable allocation and why.`;
     );
 
     // 3) TRADER
-    const traderSys = `You are the Trader Agent. Propose ONE concrete swap on Uniswap as JSON: {action:'BUY'|'SELL', token_in, token_out, amount_in_usd, reason}. Use ETH or USDC as tokens.`;
+    const traderSys = `You are the Trader Agent. Propose ONE concrete Sepolia testnet Uniswap swap as JSON: {action:'BUY'|'SELL', token_in, token_out, amount_in_usd, reason}. Use ETH as token_in and USDC as token_out for executable demo trades. Keep amount_in_usd tiny and suitable for a wallet-signed testnet transaction.`;
     const traderSchema = {
       type: "object",
       properties: {
@@ -135,7 +135,7 @@ Be decisive. Mention target ETH/stable allocation and why.`;
     );
 
     // 4) RISK MANAGER
-    const riskSys = `You are the Risk Manager. Given the trade and the volatility, return JSON {approved:boolean, reason:string, require_keeperhub:boolean}. Approve unless trade size > 30% of portfolio or volatility=high with risk_profile=conservative.`;
+    const riskSys = `You are the Risk Manager. Given the trade and the volatility, return JSON {approved:boolean, reason:string, require_keeperhub:boolean}. Only approve ETH→USDC Sepolia testnet swaps. Cap demo execution to a tiny user-wallet amount and reject if trade size > 30% of portfolio or volatility=high with risk_profile=conservative.`;
     const riskSchema = {
       type: "object",
       properties: {
@@ -171,6 +171,9 @@ Be decisive. Mention target ETH/stable allocation and why.`;
           status: "ready_for_signature",
           chain: "sepolia",
           requires_user_signature: true,
+          execution_type: "wallet_signed_uniswap_v3",
+          safety: "testnet_only_demo_cap_slippage_guard",
+          trade,
         }),
       );
     }
