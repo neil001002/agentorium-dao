@@ -164,26 +164,12 @@ const Index = () => {
         setActiveAgent(sender);
         setMessages((prev) => [...prev, m]);
         if (m.role === "execute" && typeof m.metadata === "object" && m.metadata) {
-          const md = m.metadata as { gas_gwei?: number };
-          const hashMatch = m.content.match(/0x[a-f0-9]+/);
-          setTxs((prev) => [
-            {
-              id: m.id,
-              ts: m.ts,
-              hash: hashMatch?.[0] ?? "0x" + crypto.randomUUID().replace(/-/g, "").slice(0, 40),
-              description: data.trade
-                ? `${data.trade.action} $${data.trade.amount_in_usd} ${data.trade.token_in}→${data.trade.token_out}`
-                : "Executed swap",
-              gasGwei: md.gas_gwei ?? 14,
-              status: "confirmed",
-            },
-            ...prev,
-          ]);
-          // Mock portfolio drift
-          if (data.trade) {
-            setUsdcAmt((u) => u + (data.trade.action === "SELL" ? data.trade.amount_in_usd : -data.trade.amount_in_usd));
-            setPnl24h((p) => p + Math.round((Math.random() - 0.4) * 200));
-          }
+          const description = data.trade
+            ? `Sepolia Uniswap: ${data.trade.action} 0.0001 ETH→USDC test swap`
+            : "Sepolia Uniswap test swap";
+          await executeSepoliaSwap(description);
+          setUsdcAmt((u) => u + 0.23);
+          setPnl24h((p) => p + Math.round((Math.random() - 0.4) * 20));
         }
         await new Promise((r) => setTimeout(r, 700));
       }
