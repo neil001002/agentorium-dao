@@ -164,12 +164,13 @@ Be decisive. Mention target ETH/stable allocation and why.`;
       ),
     );
 
-    // 5) EXECUTION (KeeperHub stub)
+    // 5) EXECUTION PROPOSAL (frontend wallet must sign the real testnet swap)
     if (risk.approved) {
       messages.push(
-        mkMsg("KeeperHub", "ALL", "execute", `Submitted swap via private mempool · tx 0x${crypto.randomUUID().replace(/-/g, "").slice(0, 40)}`, {
-          status: "submitted",
-          gas_gwei: 12 + Math.random() * 8,
+        mkMsg("KeeperHub", "ALL", "execute", "Trade approved. Awaiting user wallet signature for a real Sepolia testnet Uniswap execution.", {
+          status: "ready_for_signature",
+          chain: "sepolia",
+          requires_user_signature: true,
         }),
       );
     }
