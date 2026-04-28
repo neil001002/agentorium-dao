@@ -22,6 +22,15 @@ type TradeProposal = {
   amount_in_usd: number;
   reason: string;
 };
+type MemoryCommit = {
+  run_id: string;
+  content_hash: string;
+  merkle_root: string;
+  network: string;
+  indexer_url: string;
+  status: "committed" | "uploaded";
+  payload?: unknown;
+};
 
 const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
@@ -81,6 +90,7 @@ const Index = () => {
   const [pnl24h, setPnl24h] = useState(2487);
   const [ethAmt, setEthAmt] = useState(0);
   const [usdcAmt, setUsdcAmt] = useState(0);
+  const [memoryCommit, setMemoryCommit] = useState<MemoryCommit | null>(null);
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
@@ -143,6 +153,19 @@ const Index = () => {
     };
     loadLogs().catch(() => undefined);
   }, [address]);
+
+  useEffect(() => {
+    const loadMemoryCommit = async () => {
+      const query = (supabase.from("agent_memory_commits" as never) as any)
+        .select("run_id, content_hash, merkle_root, network, indexer_url, status")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const { data } = await query;
+      if (data) setMemoryCommit(data as MemoryCommit);
+    };
+    loadMemoryCommit().catch(() => undefined);
+  }, []);
 
   const getExecutionAmount = (trade?: TradeProposal) => {
     const rawEth = trade?.token_in?.toUpperCase() === "ETH" && trade.amount_in_usd > 0 ? trade.amount_in_usd / ethPrice : 0.0001;
@@ -237,6 +260,20 @@ const Index = () => {
       });
       if (error) throw error;
       const newMsgs: AxlMessage[] = data.messages ?? [];
+      if (data.memoryCommit) {
+        const commit = data.memoryCommit as MemoryCommit;
+        await (supabase.from("agent_memory_commits" as never) as any).upsert({
+          wallet_address: address,
+          run_id: commit.run_id,
+          content_hash: commit.content_hash,
+          merkle_root: commit.merkle_root,
+          payload: commit.payload,
+          network: commit.network,
+          indexer_url: commit.indexer_url,
+          status: commit.status,
+        });
+        setMemoryCommit(commit);
+      }
 
       // Stagger reveal for nice live feel
       for (const m of newMsgs) {
