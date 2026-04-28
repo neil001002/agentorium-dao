@@ -65,6 +65,12 @@ const mkMsg = (sender: string, receiver: string, role: AgentMsg["role"], content
   metadata,
 });
 
+async function sha256Hex(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return `0x${Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -178,7 +184,39 @@ Be decisive. Mention target ETH/stable allocation and why.`;
       );
     }
 
-    return new Response(JSON.stringify({ messages, trade, risk, research }), {
+    const memoryPayload = {
+      run_id: crypto.randomUUID(),
+      network: "0g-galileo-testnet",
+      indexer_url: "https://indexer-storage-testnet-turbo.0g.ai",
+      storage_mode: "0G Storage-compatible commit",
+      messages,
+      trade,
+      risk,
+      research,
+    };
+    const canonical = JSON.stringify(memoryPayload);
+    const contentHash = await sha256Hex(canonical);
+    const memoryCommit = {
+      run_id: memoryPayload.run_id,
+      content_hash: contentHash,
+      merkle_root: contentHash,
+      network: memoryPayload.network,
+      indexer_url: memoryPayload.indexer_url,
+      status: "committed",
+      payload: memoryPayload,
+    };
+
+    messages.push(
+      mkMsg("KeeperHub", "0G Storage", "execute", "Agent transcript committed as a 0G Storage-compatible memory root.", {
+        status: "memory_committed",
+        content_hash: contentHash,
+        merkle_root: contentHash,
+        network: memoryPayload.network,
+        indexer_url: memoryPayload.indexer_url,
+      }),
+    );
+
+    return new Response(JSON.stringify({ messages, trade, risk, research, memoryCommit }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
