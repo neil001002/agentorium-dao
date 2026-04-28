@@ -470,6 +470,16 @@ const Index = () => {
                 <div className="text-[11px] font-mono text-muted-foreground">
                   Real execution: AI-sized Sepolia ETH → USDC through Uniswap SwapRouter, capped at 0.0005 ETH.
                 </div>
+                <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">0G memory root</span>
+                    <span className="text-success uppercase">{memoryCommit?.status ?? "ready"}</span>
+                  </div>
+                  <div className="mt-1 truncate text-foreground/90">
+                    {memoryCommit ? memoryCommit.merkle_root : "awaiting first agent run"}
+                  </div>
+                  <div className="mt-1 text-muted-foreground truncate">{memoryCommit?.network ?? "0g-galileo-testnet"}</div>
+                </div>
               </div>
 
               <div className="mt-5 space-y-2">
@@ -529,7 +539,7 @@ const Index = () => {
         </section>
 
         <footer className="mt-12 pb-6 text-center text-[11px] font-mono text-muted-foreground">
-          built with Lovable Cloud · Lovable AI Gateway · Uniswap public quote API
+          built with Lovable Cloud · Lovable AI Gateway · 0G Storage-compatible memory commits · Uniswap public quote API
         </footer>
       </main>
     </div>
