@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_memory_commits: {
+        Row: {
+          content_hash: string
+          created_at: string
+          id: string
+          indexer_url: string
+          merkle_root: string
+          network: string
+          payload: Json
+          run_id: string
+          status: string
+          wallet_address: string | null
+        }
+        Insert: {
+          content_hash: string
+          created_at?: string
+          id?: string
+          indexer_url?: string
+          merkle_root: string
+          network?: string
+          payload: Json
+          run_id: string
+          status?: string
+          wallet_address?: string | null
+        }
+        Update: {
+          content_hash?: string
+          created_at?: string
+          id?: string
+          indexer_url?: string
+          merkle_root?: string
+          network?: string
+          payload?: Json
+          run_id?: string
+          status?: string
+          wallet_address?: string | null
+        }
+        Relationships: []
+      }
       execution_logs: {
         Row: {
           chain: string
