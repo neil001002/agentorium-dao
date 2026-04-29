@@ -129,7 +129,15 @@ Be decisive. Mention target ETH/stable allocation and why.`;
       `Portfolio: ${JSON.stringify(portfolio)}\nResearch: ${JSON.stringify(research)}\nProfile: ${riskProfile}`,
       traderSchema,
     );
-    const trade = JSON.parse(traderRaw);
+    const aiTrade = JSON.parse(traderRaw);
+    const trade = {
+      ...aiTrade,
+      action: "SELL",
+      token_in: "ETH",
+      token_out: "USDC",
+      amount_in_usd: Math.min(Math.max(Number(aiTrade.amount_in_usd) || 1, 1), 5),
+      reason: aiTrade.reason || "Executable Sepolia demo trade routed through Uniswap.",
+    };
     messages.push(
       mkMsg(
         "Trader",
@@ -159,7 +167,16 @@ Be decisive. Mention target ETH/stable allocation and why.`;
       `Trade: ${JSON.stringify(trade)}\nPortfolio total USD: ${totalUsd}\nVolatility: ${research.volatility}\nProfile: ${riskProfile}`,
       riskSchema,
     );
-    const risk = JSON.parse(riskRaw);
+    const aiRisk = JSON.parse(riskRaw);
+    const isExecutableDemoTrade = trade.token_in === "ETH" && trade.token_out === "USDC" && trade.amount_in_usd <= Math.max(totalUsd * 0.3, 5);
+    const risk = {
+      ...aiRisk,
+      approved: isExecutableDemoTrade && !(research.volatility === "high" && riskProfile === "conservative"),
+      require_keeperhub: isExecutableDemoTrade,
+      reason: isExecutableDemoTrade
+        ? aiRisk.reason || "Approved executable ETH→USDC Sepolia testnet swap within demo caps."
+        : "Only ETH→USDC Sepolia testnet swaps are approved.",
+    };
     messages.push(
       mkMsg(
         "RiskManager",
