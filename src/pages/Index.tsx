@@ -539,6 +539,40 @@ const Index = () => {
                 <div className="text-[11px] font-mono text-muted-foreground">
                   Real execution: one wallet confirmation per approved Sepolia ETH → USDC cycle, capped at 0.0005 ETH.
                 </div>
+                <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">ENS agent identity</span>
+                    <span className={ensStatus === "resolved" ? "text-success uppercase" : "text-muted-foreground uppercase"}>
+                      {ensStatus === "resolving" ? "resolving" : ensStatus === "resolved" ? "verified" : "lookup"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={ensInput}
+                      onChange={(e) => setEnsInput(e.target.value)}
+                      placeholder="agent.eth or 0x…"
+                      className="h-8 bg-muted/30 font-mono text-[11px]"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 bg-transparent"
+                      disabled={ensStatus === "resolving"}
+                      onClick={() => resolveEnsIdentity()}
+                    >
+                      Resolve
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {ensIdentity?.avatar && <img src={ensIdentity.avatar} alt={`${ensIdentity.name} ENS avatar`} className="h-7 w-7 rounded-md ring-1 ring-border object-cover" />}
+                    <div className="min-w-0">
+                      <div className="truncate text-foreground/90">{ensIdentity?.name ?? "No ENS identity resolved yet"}</div>
+                      <div className="truncate text-muted-foreground">
+                        {ensIdentity ? `${ensIdentity.address.slice(0, 6)}…${ensIdentity.address.slice(-4)} · ${ensIdentity.source} resolution` : "Used by agents for discovery and transcript attribution"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">0G memory root</span>
