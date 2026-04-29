@@ -627,6 +627,29 @@ const Index = () => {
                 </div>
                 <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono space-y-2">
                   <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Gensyn AXL mesh</span>
+                    <span className={axlStatus === "connected" ? "text-success uppercase" : axlStatus === "sending" ? "text-warning uppercase" : "text-muted-foreground uppercase"}>
+                      {axlStatus === "sending" ? "sending" : axlStatus === "checking" ? "checking" : axlStatus === "connected" ? "connected" : "local"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <Input value={axlEndpoint} onChange={(e) => setAxlEndpoint(e.target.value)} className="h-8 bg-muted/30 font-mono text-[11px]" />
+                    <Button variant="outline" size="sm" className="h-8 bg-transparent" disabled={axlStatus === "checking"} onClick={checkAxlNode}>
+                      Topology
+                    </Button>
+                  </div>
+                  <Input
+                    value={axlPeerId}
+                    onChange={(e) => setAxlPeerId(e.target.value.trim())}
+                    placeholder="remote AXL peer public key for /send"
+                    className="h-8 bg-muted/30 font-mono text-[11px]"
+                  />
+                  <div className="truncate text-muted-foreground">
+                    {axlTopology?.our_public_key ? `local ${axlTopology.our_public_key.slice(0, 10)}… · peers ${axlTopology.peers?.length ?? 0}` : "Talks to localhost:9002 and sends each agent message to a separate AXL node when a peer key is provided."}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono space-y-2">
+                  <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">ENS agent identity</span>
                     <span className={ensStatus === "resolved" ? "text-success uppercase" : "text-muted-foreground uppercase"}>
                       {ensStatus === "resolving" ? "resolving" : ensStatus === "resolved" ? "verified" : "lookup"}
