@@ -23,6 +23,13 @@ interface EnsIdentity {
   source?: "forward" | "reverse";
 }
 
+interface AxlSession {
+  local_endpoint?: string;
+  local_public_key?: string;
+  remote_peer_id?: string | null;
+  peers_visible?: number;
+}
+
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const MODEL = "google/gemini-2.5-flash";
@@ -84,15 +91,28 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { portfolio, riskProfile = "balanced", marketSnapshot, ensIdentity } = await req.json() as {
+    const { portfolio, riskProfile = "balanced", marketSnapshot, ensIdentity, axl } = await req.json() as {
       portfolio: Record<string, number>;
       riskProfile?: string;
       marketSnapshot?: Record<string, unknown>;
       ensIdentity?: EnsIdentity | null;
+      axl?: AxlSession | null;
     };
 
     const messages: AgentMsg[] = [];
     const agentIdentity = ensIdentity?.name && ensIdentity?.address ? ensIdentity : null;
+    const axlSession = axl?.local_endpoint ? axl : null;
+
+    if (axlSession) {
+      messages.push(mkMsg("Planner", "ALL", "research", `Gensyn AXL session active through ${axlSession.local_endpoint}; ${axlSession.peers_visible ?? 0} peers visible and ${axlSession.remote_peer_id ? "remote peer routing enabled" : "awaiting remote peer key"}.`, {
+        transport: "Gensyn AXL",
+        axl_endpoint: axlSession.local_endpoint,
+        axl_local_public_key: axlSession.local_public_key,
+        axl_remote_peer_id: axlSession.remote_peer_id,
+        axl_peers_visible: axlSession.peers_visible ?? 0,
+        axl_protocol: "/send raw encrypted P2P payload",
+      }));
+    }
 
     if (agentIdentity) {
       messages.push(mkMsg("Planner", "ALL", "research", `ENS identity resolved: ${agentIdentity.name} controls ${agentIdentity.address.slice(0, 6)}…${agentIdentity.address.slice(-4)} and will label this agent cycle.`, {
@@ -234,6 +254,7 @@ Be decisive. Mention target ETH/stable allocation and why.`;
       indexer_url: "https://indexer-storage-testnet-turbo.0g.ai",
       storage_mode: "0G Storage-compatible commit",
       ens_identity: agentIdentity,
+      axl_session: axlSession,
       messages,
       trade,
       risk,
