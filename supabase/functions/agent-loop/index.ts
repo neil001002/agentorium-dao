@@ -14,6 +14,15 @@ interface AgentMsg {
   metadata?: Record<string, unknown>;
 }
 
+interface EnsIdentity {
+  name: string;
+  address: string;
+  avatar?: string;
+  description?: string;
+  url?: string;
+  source?: "forward" | "reverse";
+}
+
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const MODEL = "google/gemini-2.5-flash";
@@ -75,9 +84,27 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { portfolio, riskProfile = "balanced", marketSnapshot } = await req.json();
+    const { portfolio, riskProfile = "balanced", marketSnapshot, ensIdentity } = await req.json() as {
+      portfolio: Record<string, number>;
+      riskProfile?: string;
+      marketSnapshot?: Record<string, unknown>;
+      ensIdentity?: EnsIdentity | null;
+    };
 
     const messages: AgentMsg[] = [];
+    const agentIdentity = ensIdentity?.name && ensIdentity?.address ? ensIdentity : null;
+
+    if (agentIdentity) {
+      messages.push(mkMsg("Planner", "ALL", "research", `ENS identity resolved: ${agentIdentity.name} controls ${agentIdentity.address.slice(0, 6)}…${agentIdentity.address.slice(-4)} and will label this agent cycle.`, {
+        ens_name: agentIdentity.name,
+        ens_address: agentIdentity.address,
+        ens_avatar: agentIdentity.avatar,
+        ens_description: agentIdentity.description,
+        ens_url: agentIdentity.url,
+        ens_resolution: agentIdentity.source ?? "forward",
+        identity_mechanism: "ENS",
+      }));
+    }
 
     // 1) PLANNER
     const plannerSys = `You are the Strategy Planner Agent for an autonomous onchain hedge DAO.
@@ -206,6 +233,7 @@ Be decisive. Mention target ETH/stable allocation and why.`;
       network: "0g-galileo-testnet",
       indexer_url: "https://indexer-storage-testnet-turbo.0g.ai",
       storage_mode: "0G Storage-compatible commit",
+      ens_identity: agentIdentity,
       messages,
       trade,
       risk,

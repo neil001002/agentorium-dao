@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Play, Sparkles, Square, Boxes, Network, Github } from "lucide-react";
-import { formatEther, formatGwei, formatUnits, parseEther, parseUnits, type Address } from "viem";
+import { createPublicClient, formatEther, formatGwei, formatUnits, http, parseEther, parseUnits, type Address } from "viem";
+import { mainnet } from "viem/chains";
+import { normalize } from "viem/ens";
 import { useAccount, useConnect, useDisconnect, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -31,6 +34,14 @@ type MemoryCommit = {
   status: "committed" | "uploaded";
   payload?: unknown;
 };
+type EnsIdentity = {
+  name: string;
+  address: Address;
+  avatar?: string;
+  description?: string;
+  url?: string;
+  source: "forward" | "reverse";
+};
 
 const isWalletSignedUniswapExecution = (metadata: unknown) => {
   if (!metadata || typeof metadata !== "object") return false;
@@ -45,6 +56,7 @@ const isWalletSignedUniswapExecution = (metadata: unknown) => {
 const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
 const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
+const mainnetClient = createPublicClient({ chain: mainnet, transport: http() });
 const DEFAULT_TEST_AMOUNT_IN = parseEther("0.0001");
 const MIN_TEST_AMOUNT_IN = parseEther("0.00001");
 const MAX_TEST_AMOUNT_IN = parseEther("0.0005");
@@ -83,6 +95,7 @@ const SWAP_ROUTER_ABI = [
 ] as const;
 
 const SPONSORS = [
+  { name: "ENS", desc: "Agent Identity" },
   { name: "0G", desc: "Storage & Compute" },
   { name: "Gensyn AXL", desc: "P2P Mesh" },
   { name: "Uniswap", desc: "Routing API" },
@@ -101,6 +114,9 @@ const Index = () => {
   const [ethAmt, setEthAmt] = useState(0);
   const [usdcAmt, setUsdcAmt] = useState(0);
   const [memoryCommit, setMemoryCommit] = useState<MemoryCommit | null>(null);
+  const [ensInput, setEnsInput] = useState("agentorium.eth");
+  const [ensIdentity, setEnsIdentity] = useState<EnsIdentity | null>(null);
+  const [ensStatus, setEnsStatus] = useState<"idle" | "resolving" | "resolved" | "not_found">("idle");
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
@@ -176,6 +192,46 @@ const Index = () => {
     };
     loadMemoryCommit().catch(() => undefined);
   }, []);
+
+  const resolveEnsIdentity = useCallback(async (nameOrAddress?: string) => {
+    const value = (nameOrAddress ?? ensInput).trim();
+    if (!value) return;
+
+    setEnsStatus("resolving");
+    try {
+      if (value.endsWith(".eth")) {
+        const name = normalize(value);
+        const resolvedAddress = await mainnetClient.getEnsAddress({ name });
+        if (!resolvedAddress) throw new Error("ENS name did not resolve to an address.");
+        const [avatar, description, url] = await Promise.all([
+          mainnetClient.getEnsAvatar({ name }).catch(() => undefined),
+          mainnetClient.getEnsText({ name, key: "description" }).catch(() => undefined),
+          mainnetClient.getEnsText({ name, key: "url" }).catch(() => undefined),
+        ]);
+        setEnsIdentity({ name, address: resolvedAddress, avatar: avatar ?? undefined, description: description ?? undefined, url: url ?? undefined, source: "forward" });
+      } else if (/^0x[a-fA-F0-9]{40}$/.test(value)) {
+        const reverseName = await mainnetClient.getEnsName({ address: value as Address });
+        if (!reverseName) throw new Error("Address has no ENS reverse record.");
+        const [avatar, description, url] = await Promise.all([
+          mainnetClient.getEnsAvatar({ name: reverseName }).catch(() => undefined),
+          mainnetClient.getEnsText({ name: reverseName, key: "description" }).catch(() => undefined),
+          mainnetClient.getEnsText({ name: reverseName, key: "url" }).catch(() => undefined),
+        ]);
+        setEnsIdentity({ name: reverseName, address: value as Address, avatar: avatar ?? undefined, description: description ?? undefined, url: url ?? undefined, source: "reverse" });
+      } else {
+        throw new Error("Enter an ENS name or wallet address.");
+      }
+      setEnsStatus("resolved");
+    } catch (e) {
+      setEnsIdentity(null);
+      setEnsStatus("not_found");
+      toast({ title: "ENS identity not found", description: e instanceof Error ? e.message : "Try another ENS name.", variant: "destructive" });
+    }
+  }, [ensInput]);
+
+  useEffect(() => {
+    if (address) resolveEnsIdentity(address).catch(() => undefined);
+  }, [address, resolveEnsIdentity]);
 
   const getExecutionAmount = (trade?: TradeProposal) => {
     const rawEth = trade?.token_in?.toUpperCase() === "ETH" && trade.amount_in_usd > 0 ? trade.amount_in_usd / ethPrice : 0.0001;
@@ -266,6 +322,7 @@ const Index = () => {
           portfolio: { eth_usd: ethAmt * ethPrice, usdc: usdcAmt, wbtc_usd: wbtcAmt * 67_000 },
           riskProfile: risk,
           marketSnapshot: { eth_price: ethPrice },
+          ensIdentity,
         },
       });
       if (error) throw error;
@@ -481,6 +538,40 @@ const Index = () => {
                 )}
                 <div className="text-[11px] font-mono text-muted-foreground">
                   Real execution: one wallet confirmation per approved Sepolia ETH → USDC cycle, capped at 0.0005 ETH.
+                </div>
+                <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">ENS agent identity</span>
+                    <span className={ensStatus === "resolved" ? "text-success uppercase" : "text-muted-foreground uppercase"}>
+                      {ensStatus === "resolving" ? "resolving" : ensStatus === "resolved" ? "verified" : "lookup"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={ensInput}
+                      onChange={(e) => setEnsInput(e.target.value)}
+                      placeholder="agent.eth or 0x…"
+                      className="h-8 bg-muted/30 font-mono text-[11px]"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 bg-transparent"
+                      disabled={ensStatus === "resolving"}
+                      onClick={() => resolveEnsIdentity()}
+                    >
+                      Resolve
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {ensIdentity?.avatar && <img src={ensIdentity.avatar} alt={`${ensIdentity.name} ENS avatar`} className="h-7 w-7 rounded-md ring-1 ring-border object-cover" />}
+                    <div className="min-w-0">
+                      <div className="truncate text-foreground/90">{ensIdentity?.name ?? "No ENS identity resolved yet"}</div>
+                      <div className="truncate text-muted-foreground">
+                        {ensIdentity ? `${ensIdentity.address.slice(0, 6)}…${ensIdentity.address.slice(-4)} · ${ensIdentity.source} resolution` : "Used by agents for discovery and transcript attribution"}
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono">
                   <div className="flex items-center justify-between gap-3">
