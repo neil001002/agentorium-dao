@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Play, Sparkles, Square, Boxes, Network, Github } from "lucide-react";
-import { formatEther, formatGwei, formatUnits, parseEther, parseUnits, type Address } from "viem";
+import { createPublicClient, formatEther, formatGwei, formatUnits, http, parseEther, parseUnits, type Address } from "viem";
+import { mainnet } from "viem/chains";
+import { normalize } from "viem/ens";
 import { useAccount, useConnect, useDisconnect, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -31,6 +34,14 @@ type MemoryCommit = {
   status: "committed" | "uploaded";
   payload?: unknown;
 };
+type EnsIdentity = {
+  name: string;
+  address: Address;
+  avatar?: string;
+  description?: string;
+  url?: string;
+  source: "forward" | "reverse";
+};
 
 const isWalletSignedUniswapExecution = (metadata: unknown) => {
   if (!metadata || typeof metadata !== "object") return false;
@@ -45,6 +56,7 @@ const isWalletSignedUniswapExecution = (metadata: unknown) => {
 const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
 const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
+const mainnetClient = createPublicClient({ chain: mainnet, transport: http() });
 const DEFAULT_TEST_AMOUNT_IN = parseEther("0.0001");
 const MIN_TEST_AMOUNT_IN = parseEther("0.00001");
 const MAX_TEST_AMOUNT_IN = parseEther("0.0005");
@@ -83,6 +95,7 @@ const SWAP_ROUTER_ABI = [
 ] as const;
 
 const SPONSORS = [
+  { name: "ENS", desc: "Agent Identity" },
   { name: "0G", desc: "Storage & Compute" },
   { name: "Gensyn AXL", desc: "P2P Mesh" },
   { name: "Uniswap", desc: "Routing API" },
