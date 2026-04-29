@@ -375,6 +375,12 @@ const Index = () => {
           riskProfile: risk,
           marketSnapshot: { eth_price: ethPrice },
           ensIdentity,
+          axl: {
+            local_endpoint: axlEndpoint,
+            local_public_key: axlTopology?.our_public_key,
+            remote_peer_id: axlPeerId || null,
+            peers_visible: axlTopology?.peers?.length ?? 0,
+          },
         },
       });
       if (error) throw error;
@@ -399,7 +405,35 @@ const Index = () => {
       for (const m of newMsgs) {
         const sender = m.sender as AgentKey;
         setActiveAgent(sender);
-        setMessages((prev) => [...prev, m]);
+        let deliveredMessage = m;
+        if (axlPeerId && m.receiver !== "0G Storage") {
+          try {
+            const delivery = await sendOverAxl(m);
+            deliveredMessage = {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                axl_transport: "Gensyn AXL /send",
+                axl_remote_peer_id: axlPeerId,
+                axl_delivered: delivery.delivered,
+                axl_sent_bytes: delivery.bytes,
+              },
+            };
+          } catch (e) {
+            deliveredMessage = {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                axl_transport: "Gensyn AXL /send",
+                axl_remote_peer_id: axlPeerId,
+                axl_delivered: false,
+                axl_error: e instanceof Error ? e.message : "AXL send failed",
+              },
+            };
+            setAxlStatus("unreachable");
+          }
+        }
+        setMessages((prev) => [...prev, deliveredMessage]);
         if (!swapRequested && m.role === "execute" && isWalletSignedUniswapExecution(m.metadata)) {
           swapRequested = true;
           await executeSepoliaSwap(data.trade as TradeProposal | undefined);
