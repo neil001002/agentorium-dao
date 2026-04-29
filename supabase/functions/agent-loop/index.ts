@@ -207,7 +207,7 @@ Be decisive. Mention target ETH/stable allocation and why.`;
     };
 
     messages.push(
-      mkMsg("KeeperHub", "0G Storage", "execute", "Agent transcript committed as a 0G Storage-compatible memory root.", {
+      mkMsg("KeeperHub", "0G Storage", "research", "Agent transcript committed as a 0G Storage-compatible memory root.", {
         status: "memory_committed",
         content_hash: contentHash,
         merkle_root: contentHash,
