@@ -1,82 +1,45 @@
-Plan to make executions real using Uniswap testnet swaps with a user wallet
+I found the likely reason MetaMask asks twice: the app has two separate execution triggers that can call the wallet-signed Uniswap swap.
 
-Scope confirmed:
-- Execution: real testnet swaps, not mainnet funds
-- Authorization: user-connected wallet signs every transaction
-- First real integration: Uniswap
+1. The main button runs `runOnce()`.
+2. The auto-loop feature can also call `runOnce()` in a loop.
+3. Inside `runOnce()`, every message with `role === "execute"` triggers `executeSepoliaSwap(...)`, which calls `writeContractAsync(...)` and opens MetaMask.
 
-What will change
+Because the agent response currently includes more than one `execute`-role message, the frontend can attempt a wallet transaction more than once in the same cycle. One is the actual swap request, and the newer 0G memory commit message is also marked as `execute`, so it can accidentally trigger the swap logic too.
 
-1. Add wallet connection
-- Add Ethereum wallet support to the React app using Wagmi/Viem and a wallet connector such as MetaMask/injected wallets.
-- Configure a testnet network, preferably Sepolia, so the app does not touch real mainnet funds.
-- Show connection state in the Strategy Controls panel: disconnected, connected address, chain, and a warning if the user is on the wrong network.
+Plan to fix:
 
-2. Replace simulated execution with a real transaction flow
-- Keep the AI multi-agent loop for Planner → Researcher → Trader → Risk Manager.
-- Change the final “KeeperHub execution” stage from fake tx generation to a “ready to execute” trade proposal.
-- After Risk Manager approval, the frontend will build and submit a real Uniswap testnet swap transaction from the connected wallet.
-- The user will see the wallet confirmation popup and must approve the transaction manually.
+1. Make transaction triggering stricter
+   - Only call `executeSepoliaSwap(...)` when the message metadata explicitly says it is a wallet-signed Uniswap execution.
+   - Use fields already emitted by the backend, such as:
+     - `status === "ready_for_signature"`
+     - `execution_type === "wallet_signed_uniswap_v3"`
+     - `requires_user_signature === true`
 
-3. Use real Uniswap testnet routing/quote data
-- Update the quote path so it supports testnet token pairs rather than the current CoinGecko-only sample quote.
-- Use known testnet token addresses for ETH/WETH and a testnet stable/token pair where Uniswap has usable liquidity.
-- Add guardrails so the AI can only propose supported token pairs and small test amounts.
+2. Prevent duplicate swaps within one agent cycle
+   - Add a local guard inside `runOnce()` so only one wallet transaction can be requested per cycle, even if multiple qualifying messages appear.
 
-4. Update the UI for real execution status
-- Rename labels that currently imply simulated execution.
-- Add states such as: “wallet required”, “quote ready”, “awaiting signature”, “submitted”, “confirmed”, and “failed”.
-- KeeperLog will record the actual transaction hash returned by the wallet provider instead of a generated fake hash.
-- Add a link to the relevant testnet block explorer for each submitted tx.
+3. Separate 0G memory messages from wallet execution messages
+   - Change the 0G memory commit message role from `execute` to a non-transaction role such as `research` or `plan`, or keep it visible but ensure the frontend never treats `memory_committed` metadata as a swap request.
 
-5. Add safety controls
-- Disable execution unless a wallet is connected and on the correct testnet.
-- Enforce testnet-only chain checks.
-- Cap transaction size to tiny test amounts.
-- Require explicit user wallet confirmation; no private keys or server-side signing will be added.
-- Keep mainnet execution unavailable unless you explicitly request it later.
+4. Improve the UI copy
+   - Update the wallet status text so it is clear that MetaMask should only open once per approved cycle.
 
-6. Fix the existing quote reliability issue while integrating Uniswap
-- The current `uniswap-quote` function can still fail cold-starts when CoinGecko returns 429 and no warm cache exists.
-- I will add deterministic fallback quote data or improve the function so the app never blanks because of an upstream rate limit.
+Technical change targets:
 
-Technical details
+- `src/pages/Index.tsx`
+  - Replace the broad condition:
+    ```ts
+    if (m.role === "execute" && typeof m.metadata === "object" && m.metadata) {
+      await executeSepoliaSwap(...)
+    }
+    ```
+    with a stricter check for the Uniswap execution metadata and a per-cycle duplicate guard.
 
-Expected architecture:
+- `supabase/functions/agent-loop/index.ts`
+  - Adjust the 0G memory commit message so it cannot be confused with an execution request.
 
-```text
-User wallet
-   |
-   | signs transaction
-   v
-React app + Wagmi/Viem
-   |
-   | gets route/quote + transaction calldata
-   v
-Uniswap testnet integration
-   |
-   | tx hash / receipt
-   v
-KeeperLog audit trail in UI
+Expected result:
 
-Lovable Cloud function
-   |
-   | AI agent reasoning only
-   v
-Planner -> Researcher -> Trader -> Risk Manager -> approved trade proposal
-```
-
-Files likely to be updated:
-- `package.json` for wallet/Web3 dependencies
-- `src/main.tsx` or `src/App.tsx` for wallet provider setup
-- `src/pages/Index.tsx` for wallet connection, execution controls, and real tx handling
-- `src/components/UniswapQuoteCard.tsx` for testnet quote display
-- `src/components/KeeperLog.tsx` for explorer links and real hashes
-- `supabase/functions/agent-loop/index.ts` to stop creating fake execution tx hashes and return an approved execution proposal
-- `supabase/functions/uniswap-quote/index.ts` to improve quote reliability and/or support testnet quote data
-
-Notes and assumptions
-- I will not store private keys.
-- I will not add backend signing.
-- I will not enable mainnet trading.
-- If the chosen testnet token pair has poor Uniswap liquidity, I will use a safer testnet-compatible pair or make the app clearly report “no route available” rather than faking execution.
+- One approved cycle = at most one MetaMask transaction confirmation.
+- 0G memory commits will still be shown and stored, but they will not trigger wallet signing.
+- Auto-loop will still work, but each cycle will only request one swap confirmation.

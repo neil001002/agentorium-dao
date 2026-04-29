@@ -32,6 +32,16 @@ type MemoryCommit = {
   payload?: unknown;
 };
 
+const isWalletSignedUniswapExecution = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== "object") return false;
+  const meta = metadata as Record<string, unknown>;
+  return (
+    meta.status === "ready_for_signature" &&
+    meta.execution_type === "wallet_signed_uniswap_v3" &&
+    meta.requires_user_signature === true
+  );
+};
+
 const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
 const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
@@ -276,11 +286,13 @@ const Index = () => {
       }
 
       // Stagger reveal for nice live feel
+      let swapRequested = false;
       for (const m of newMsgs) {
         const sender = m.sender as AgentKey;
         setActiveAgent(sender);
         setMessages((prev) => [...prev, m]);
-        if (m.role === "execute" && typeof m.metadata === "object" && m.metadata) {
+        if (!swapRequested && m.role === "execute" && isWalletSignedUniswapExecution(m.metadata)) {
+          swapRequested = true;
           await executeSepoliaSwap(data.trade as TradeProposal | undefined);
           setPnl24h((p) => p + Math.round((Math.random() - 0.4) * 20));
         }
@@ -468,7 +480,7 @@ const Index = () => {
                   </Button>
                 )}
                 <div className="text-[11px] font-mono text-muted-foreground">
-                  Real execution: AI-sized Sepolia ETH → USDC through Uniswap SwapRouter, capped at 0.0005 ETH.
+                  Real execution: one wallet confirmation per approved Sepolia ETH → USDC cycle, capped at 0.0005 ETH.
                 </div>
                 <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono">
                   <div className="flex items-center justify-between gap-3">
