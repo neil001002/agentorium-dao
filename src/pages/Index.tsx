@@ -751,7 +751,7 @@ const Index = () => {
         </section>
 
         <footer className="mt-12 pb-6 text-center text-[11px] font-mono text-muted-foreground">
-          built with Lovable Cloud · Lovable AI Gateway · 0G Storage-compatible memory commits · Uniswap public quote API
+          built with Lovable Cloud · Lovable AI Gateway · Gensyn AXL localhost bridge · 0G Storage-compatible memory commits · Uniswap public quote API
         </footer>
       </main>
     </div>
