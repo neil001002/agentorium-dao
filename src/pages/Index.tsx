@@ -124,6 +124,10 @@ const Index = () => {
   const [ensInput, setEnsInput] = useState("agentorium.eth");
   const [ensIdentity, setEnsIdentity] = useState<EnsIdentity | null>(null);
   const [ensStatus, setEnsStatus] = useState<"idle" | "resolving" | "resolved" | "not_found">("idle");
+  const [axlEndpoint, setAxlEndpoint] = useState("http://127.0.0.1:9002");
+  const [axlPeerId, setAxlPeerId] = useState("");
+  const [axlTopology, setAxlTopology] = useState<AxlTopology | null>(null);
+  const [axlStatus, setAxlStatus] = useState<"idle" | "checking" | "connected" | "unreachable" | "sending">("idle");
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
@@ -239,6 +243,47 @@ const Index = () => {
   useEffect(() => {
     if (address) resolveEnsIdentity(address).catch(() => undefined);
   }, [address, resolveEnsIdentity]);
+
+  const checkAxlNode = useCallback(async () => {
+    setAxlStatus("checking");
+    try {
+      const res = await fetch(`${axlEndpoint.replace(/\/$/, "")}/topology`);
+      if (!res.ok) throw new Error(`AXL topology returned ${res.status}`);
+      const topology = await res.json() as AxlTopology;
+      setAxlTopology(topology);
+      setAxlStatus("connected");
+      toast({ title: "AXL node connected", description: `${topology.peers?.length ?? 0} peers visible on the local mesh.` });
+    } catch (e) {
+      setAxlTopology(null);
+      setAxlStatus("unreachable");
+      toast({ title: "AXL node unreachable", description: e instanceof Error ? e.message : "Run AXL locally on port 9002.", variant: "destructive" });
+    }
+  }, [axlEndpoint]);
+
+  const sendOverAxl = useCallback(async (message: AxlMessage) => {
+    if (!AXL_PEER_ID_RE.test(axlPeerId)) return { delivered: false, reason: "missing_remote_peer" };
+
+    setAxlStatus("sending");
+    const payload = JSON.stringify({
+      protocol: "agentorium.axl.v1",
+      transport: "Gensyn AXL",
+      message,
+      ensIdentity,
+      sent_at: new Date().toISOString(),
+    });
+
+    const res = await fetch(`${axlEndpoint.replace(/\/$/, "")}/send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Destination-Peer-Id": axlPeerId,
+      },
+      body: new TextEncoder().encode(payload),
+    });
+    if (!res.ok) throw new Error(`AXL send returned ${res.status}`);
+    setAxlStatus("connected");
+    return { delivered: true, bytes: res.headers.get("X-Sent-Bytes") ?? String(payload.length) };
+  }, [axlEndpoint, axlPeerId, ensIdentity]);
 
   const getExecutionAmount = (trade?: TradeProposal) => {
     const rawEth = trade?.token_in?.toUpperCase() === "ETH" && trade.amount_in_usd > 0 ? trade.amount_in_usd / ethPrice : 0.0001;
