@@ -114,6 +114,9 @@ const Index = () => {
   const [ethAmt, setEthAmt] = useState(0);
   const [usdcAmt, setUsdcAmt] = useState(0);
   const [memoryCommit, setMemoryCommit] = useState<MemoryCommit | null>(null);
+  const [ensInput, setEnsInput] = useState("agentorium.eth");
+  const [ensIdentity, setEnsIdentity] = useState<EnsIdentity | null>(null);
+  const [ensStatus, setEnsStatus] = useState<"idle" | "resolving" | "resolved" | "not_found">("idle");
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
@@ -189,6 +192,46 @@ const Index = () => {
     };
     loadMemoryCommit().catch(() => undefined);
   }, []);
+
+  const resolveEnsIdentity = useCallback(async (nameOrAddress?: string) => {
+    const value = (nameOrAddress ?? ensInput).trim();
+    if (!value) return;
+
+    setEnsStatus("resolving");
+    try {
+      if (value.endsWith(".eth")) {
+        const name = normalize(value);
+        const resolvedAddress = await mainnetClient.getEnsAddress({ name });
+        if (!resolvedAddress) throw new Error("ENS name did not resolve to an address.");
+        const [avatar, description, url] = await Promise.all([
+          mainnetClient.getEnsAvatar({ name }).catch(() => undefined),
+          mainnetClient.getEnsText({ name, key: "description" }).catch(() => undefined),
+          mainnetClient.getEnsText({ name, key: "url" }).catch(() => undefined),
+        ]);
+        setEnsIdentity({ name, address: resolvedAddress, avatar: avatar ?? undefined, description: description ?? undefined, url: url ?? undefined, source: "forward" });
+      } else if (/^0x[a-fA-F0-9]{40}$/.test(value)) {
+        const reverseName = await mainnetClient.getEnsName({ address: value as Address });
+        if (!reverseName) throw new Error("Address has no ENS reverse record.");
+        const [avatar, description, url] = await Promise.all([
+          mainnetClient.getEnsAvatar({ name: reverseName }).catch(() => undefined),
+          mainnetClient.getEnsText({ name: reverseName, key: "description" }).catch(() => undefined),
+          mainnetClient.getEnsText({ name: reverseName, key: "url" }).catch(() => undefined),
+        ]);
+        setEnsIdentity({ name: reverseName, address: value as Address, avatar: avatar ?? undefined, description: description ?? undefined, url: url ?? undefined, source: "reverse" });
+      } else {
+        throw new Error("Enter an ENS name or wallet address.");
+      }
+      setEnsStatus("resolved");
+    } catch (e) {
+      setEnsIdentity(null);
+      setEnsStatus("not_found");
+      toast({ title: "ENS identity not found", description: e instanceof Error ? e.message : "Try another ENS name.", variant: "destructive" });
+    }
+  }, [ensInput]);
+
+  useEffect(() => {
+    if (address) resolveEnsIdentity(address).catch(() => undefined);
+  }, [address, resolveEnsIdentity]);
 
   const getExecutionAmount = (trade?: TradeProposal) => {
     const rawEth = trade?.token_in?.toUpperCase() === "ETH" && trade.amount_in_usd > 0 ? trade.amount_in_usd / ethPrice : 0.0001;
@@ -279,6 +322,7 @@ const Index = () => {
           portfolio: { eth_usd: ethAmt * ethPrice, usdc: usdcAmt, wbtc_usd: wbtcAmt * 67_000 },
           riskProfile: risk,
           marketSnapshot: { eth_price: ethPrice },
+          ensIdentity,
         },
       });
       if (error) throw error;
