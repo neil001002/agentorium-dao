@@ -42,6 +42,12 @@ type EnsIdentity = {
   url?: string;
   source: "forward" | "reverse";
 };
+type AxlTopology = {
+  our_ipv6?: string;
+  our_public_key?: string;
+  peers?: unknown[];
+  tree?: unknown[];
+};
 
 const isWalletSignedUniswapExecution = (metadata: unknown) => {
   if (!metadata || typeof metadata !== "object") return false;
@@ -57,6 +63,7 @@ const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
 const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
 const mainnetClient = createPublicClient({ chain: mainnet, transport: http() });
+const AXL_PEER_ID_RE = /^[a-fA-F0-9]{64}$/;
 const DEFAULT_TEST_AMOUNT_IN = parseEther("0.0001");
 const MIN_TEST_AMOUNT_IN = parseEther("0.00001");
 const MAX_TEST_AMOUNT_IN = parseEther("0.0005");
