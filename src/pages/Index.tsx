@@ -42,6 +42,12 @@ type EnsIdentity = {
   url?: string;
   source: "forward" | "reverse";
 };
+type AxlTopology = {
+  our_ipv6?: string;
+  our_public_key?: string;
+  peers?: unknown[];
+  tree?: unknown[];
+};
 
 const isWalletSignedUniswapExecution = (metadata: unknown) => {
   if (!metadata || typeof metadata !== "object") return false;
@@ -57,6 +63,7 @@ const SEPOLIA_WETH = "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" as Address;
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as Address;
 const SEPOLIA_SWAP_ROUTER = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E" as Address;
 const mainnetClient = createPublicClient({ chain: mainnet, transport: http() });
+const AXL_PEER_ID_RE = /^[a-fA-F0-9]{64}$/;
 const DEFAULT_TEST_AMOUNT_IN = parseEther("0.0001");
 const MIN_TEST_AMOUNT_IN = parseEther("0.00001");
 const MAX_TEST_AMOUNT_IN = parseEther("0.0005");
@@ -117,6 +124,10 @@ const Index = () => {
   const [ensInput, setEnsInput] = useState("agentorium.eth");
   const [ensIdentity, setEnsIdentity] = useState<EnsIdentity | null>(null);
   const [ensStatus, setEnsStatus] = useState<"idle" | "resolving" | "resolved" | "not_found">("idle");
+  const [axlEndpoint, setAxlEndpoint] = useState("http://127.0.0.1:9002");
+  const [axlPeerId, setAxlPeerId] = useState("");
+  const [axlTopology, setAxlTopology] = useState<AxlTopology | null>(null);
+  const [axlStatus, setAxlStatus] = useState<"idle" | "checking" | "connected" | "unreachable" | "sending">("idle");
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
@@ -233,6 +244,47 @@ const Index = () => {
     if (address) resolveEnsIdentity(address).catch(() => undefined);
   }, [address, resolveEnsIdentity]);
 
+  const checkAxlNode = useCallback(async () => {
+    setAxlStatus("checking");
+    try {
+      const res = await fetch(`${axlEndpoint.replace(/\/$/, "")}/topology`);
+      if (!res.ok) throw new Error(`AXL topology returned ${res.status}`);
+      const topology = await res.json() as AxlTopology;
+      setAxlTopology(topology);
+      setAxlStatus("connected");
+      toast({ title: "AXL node connected", description: `${topology.peers?.length ?? 0} peers visible on the local mesh.` });
+    } catch (e) {
+      setAxlTopology(null);
+      setAxlStatus("unreachable");
+      toast({ title: "AXL node unreachable", description: e instanceof Error ? e.message : "Run AXL locally on port 9002.", variant: "destructive" });
+    }
+  }, [axlEndpoint]);
+
+  const sendOverAxl = useCallback(async (message: AxlMessage) => {
+    if (!AXL_PEER_ID_RE.test(axlPeerId)) return { delivered: false, reason: "missing_remote_peer" };
+
+    setAxlStatus("sending");
+    const payload = JSON.stringify({
+      protocol: "agentorium.axl.v1",
+      transport: "Gensyn AXL",
+      message,
+      ensIdentity,
+      sent_at: new Date().toISOString(),
+    });
+
+    const res = await fetch(`${axlEndpoint.replace(/\/$/, "")}/send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Destination-Peer-Id": axlPeerId,
+      },
+      body: new TextEncoder().encode(payload),
+    });
+    if (!res.ok) throw new Error(`AXL send returned ${res.status}`);
+    setAxlStatus("connected");
+    return { delivered: true, bytes: res.headers.get("X-Sent-Bytes") ?? String(payload.length) };
+  }, [axlEndpoint, axlPeerId, ensIdentity]);
+
   const getExecutionAmount = (trade?: TradeProposal) => {
     const rawEth = trade?.token_in?.toUpperCase() === "ETH" && trade.amount_in_usd > 0 ? trade.amount_in_usd / ethPrice : 0.0001;
     const requested = parseEther(Math.max(0.00001, rawEth).toFixed(8));
@@ -323,6 +375,12 @@ const Index = () => {
           riskProfile: risk,
           marketSnapshot: { eth_price: ethPrice },
           ensIdentity,
+          axl: {
+            local_endpoint: axlEndpoint,
+            local_public_key: axlTopology?.our_public_key,
+            remote_peer_id: axlPeerId || null,
+            peers_visible: axlTopology?.peers?.length ?? 0,
+          },
         },
       });
       if (error) throw error;
@@ -347,7 +405,35 @@ const Index = () => {
       for (const m of newMsgs) {
         const sender = m.sender as AgentKey;
         setActiveAgent(sender);
-        setMessages((prev) => [...prev, m]);
+        let deliveredMessage = m;
+        if (axlPeerId && m.receiver !== "0G Storage") {
+          try {
+            const delivery = await sendOverAxl(m);
+            deliveredMessage = {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                axl_transport: "Gensyn AXL /send",
+                axl_remote_peer_id: axlPeerId,
+                axl_delivered: delivery.delivered,
+                axl_sent_bytes: delivery.bytes,
+              },
+            };
+          } catch (e) {
+            deliveredMessage = {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                axl_transport: "Gensyn AXL /send",
+                axl_remote_peer_id: axlPeerId,
+                axl_delivered: false,
+                axl_error: e instanceof Error ? e.message : "AXL send failed",
+              },
+            };
+            setAxlStatus("unreachable");
+          }
+        }
+        setMessages((prev) => [...prev, deliveredMessage]);
         if (!swapRequested && m.role === "execute" && isWalletSignedUniswapExecution(m.metadata)) {
           swapRequested = true;
           await executeSepoliaSwap(data.trade as TradeProposal | undefined);
@@ -541,6 +627,29 @@ const Index = () => {
                 </div>
                 <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono space-y-2">
                   <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Gensyn AXL mesh</span>
+                    <span className={axlStatus === "connected" ? "text-success uppercase" : axlStatus === "sending" ? "text-warning uppercase" : "text-muted-foreground uppercase"}>
+                      {axlStatus === "sending" ? "sending" : axlStatus === "checking" ? "checking" : axlStatus === "connected" ? "connected" : "local"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <Input value={axlEndpoint} onChange={(e) => setAxlEndpoint(e.target.value)} className="h-8 bg-muted/30 font-mono text-[11px]" />
+                    <Button variant="outline" size="sm" className="h-8 bg-transparent" disabled={axlStatus === "checking"} onClick={checkAxlNode}>
+                      Topology
+                    </Button>
+                  </div>
+                  <Input
+                    value={axlPeerId}
+                    onChange={(e) => setAxlPeerId(e.target.value.trim())}
+                    placeholder="remote AXL peer public key for /send"
+                    className="h-8 bg-muted/30 font-mono text-[11px]"
+                  />
+                  <div className="truncate text-muted-foreground">
+                    {axlTopology?.our_public_key ? `local ${axlTopology.our_public_key.slice(0, 10)}… · peers ${axlTopology.peers?.length ?? 0}` : "Talks to localhost:9002 and sends each agent message to a separate AXL node when a peer key is provided."}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-background/50 ring-1 ring-border/60 p-2.5 text-[11px] font-mono space-y-2">
+                  <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">ENS agent identity</span>
                     <span className={ensStatus === "resolved" ? "text-success uppercase" : "text-muted-foreground uppercase"}>
                       {ensStatus === "resolving" ? "resolving" : ensStatus === "resolved" ? "verified" : "lookup"}
@@ -642,7 +751,7 @@ const Index = () => {
         </section>
 
         <footer className="mt-12 pb-6 text-center text-[11px] font-mono text-muted-foreground">
-          built with Lovable Cloud · Lovable AI Gateway · 0G Storage-compatible memory commits · Uniswap public quote API
+          built with Lovable Cloud · Lovable AI Gateway · Gensyn AXL localhost bridge · 0G Storage-compatible memory commits · Uniswap public quote API
         </footer>
       </main>
     </div>
