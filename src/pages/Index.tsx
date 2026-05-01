@@ -204,9 +204,10 @@ const Index = () => {
     loadMemoryCommit().catch(() => undefined);
   }, []);
 
-  const resolveEnsIdentity = useCallback(async (nameOrAddress?: string) => {
+  const resolveEnsIdentity = useCallback(async (nameOrAddress?: string, options?: { silent?: boolean }) => {
     const value = (nameOrAddress ?? ensInput).trim();
     if (!value) return;
+    const silent = options?.silent ?? false;
 
     setEnsStatus("resolving");
     try {
@@ -236,12 +237,14 @@ const Index = () => {
     } catch (e) {
       setEnsIdentity(null);
       setEnsStatus("not_found");
-      toast({ title: "ENS identity not found", description: e instanceof Error ? e.message : "Try another ENS name.", variant: "destructive" });
+      if (!silent) {
+        toast({ title: "ENS identity not found", description: e instanceof Error ? e.message : "Try another ENS name.", variant: "destructive" });
+      }
     }
   }, [ensInput]);
 
   useEffect(() => {
-    if (address) resolveEnsIdentity(address).catch(() => undefined);
+    if (address) resolveEnsIdentity(address, { silent: true }).catch(() => undefined);
   }, [address, resolveEnsIdentity]);
 
   const checkAxlNode = useCallback(async () => {
