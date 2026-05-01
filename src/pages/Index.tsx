@@ -204,9 +204,10 @@ const Index = () => {
     loadMemoryCommit().catch(() => undefined);
   }, []);
 
-  const resolveEnsIdentity = useCallback(async (nameOrAddress?: string) => {
+  const resolveEnsIdentity = useCallback(async (nameOrAddress?: string, options?: { silent?: boolean }) => {
     const value = (nameOrAddress ?? ensInput).trim();
     if (!value) return;
+    const silent = options?.silent ?? false;
 
     setEnsStatus("resolving");
     try {
