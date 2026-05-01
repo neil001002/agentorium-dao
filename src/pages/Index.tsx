@@ -237,12 +237,14 @@ const Index = () => {
     } catch (e) {
       setEnsIdentity(null);
       setEnsStatus("not_found");
-      toast({ title: "ENS identity not found", description: e instanceof Error ? e.message : "Try another ENS name.", variant: "destructive" });
+      if (!silent) {
+        toast({ title: "ENS identity not found", description: e instanceof Error ? e.message : "Try another ENS name.", variant: "destructive" });
+      }
     }
   }, [ensInput]);
 
   useEffect(() => {
-    if (address) resolveEnsIdentity(address).catch(() => undefined);
+    if (address) resolveEnsIdentity(address, { silent: true }).catch(() => undefined);
   }, [address, resolveEnsIdentity]);
 
   const checkAxlNode = useCallback(async () => {
